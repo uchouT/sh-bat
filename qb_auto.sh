@@ -17,14 +17,15 @@ qb_version="4.5.4"
 qb_username="admin"
 qb_password="password"
 qb_web_url="http://localhost:8080"
-log_dir="/root/qblog"
+log_dir="$HOME/qblog"
 rclone_dest="od"
 rclone_parallel="5"
 uploaded_flag="rcloned"
 alist_host="http://localhost:5244"
 alist_token=""
-
-
+emby_host="http://localhost:8091"
+emby_api_key=""
+emby_ids=("3")
 if [ ! -d ${log_dir} ]
 then
 	mkdir -p ${log_dir}
@@ -64,8 +65,19 @@ function qb_login(){
 		exit
 	fi
 }
-
-function alist_refresh() {
+function emby_refresh(){
+  local s="Recursive=true&ImageRefreshMode=Default&MetadataRefreshMode=Default&ReplaceAllImages=false&ReplaceAllMetadata=false"
+  for id in "${emby_ids[@]}"; do
+	  local code=$(curl -s -o /dev/null -w "%{http_code}" \
+	  -X POST "${emby_host}/emby/Items/${id}/Refresh?${s}&api_key=${emby_api_key}")
+	  if [ "$code" -eq 200 ]; then
+		  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新成功！" >> ${log_dir}/ani.log
+	  else
+		  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新失败！" >> ${log_dir}/ani.log
+	  fi
+  done
+}
+function alist_refresh(){
   local path="$1"
   local url="${alist_host}/api/fs/list"
   local json
@@ -79,9 +91,9 @@ function alist_refresh() {
   code=$(echo "$res" | jq -r '.code')
   if [ "$code" -eq 200 ]
   then
-    	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Alist: $path 刷新成功！" >> ${log_dir}/alist.log
+    	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Alist: $path 刷新成功！" >> ${log_dir}/ani.log
   else
-	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Alist: $path 刷新失败！" >> ${log_dir}/alist.log
+	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Alist: $path 刷新失败！" >> ${log_dir}/ani.log
   fi
 }
 
@@ -108,6 +120,7 @@ function rclone_copy(){
 	then
 		alist_refresh "/Media/Bangumi"
 		alist_refresh "${target_dir}"
+		emby_refresh
 	fi
 }
 

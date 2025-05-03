@@ -10,14 +10,14 @@ torrent_type=$8
 
 # if [ ${torrent_type} == "ani-rss" ]
 # then
-# 	 exit 0
+# 	exit 0
 # fi
 
 qb_version="4.5.4"
 qb_username="admin"
 qb_password="password"
 qb_web_url="http://localhost:8080"
-log_dir="$HOME/qblog"
+log_dir="/root/qblog"
 rclone_dest="od"
 rclone_parallel="5"
 uploaded_flag="rcloned"
@@ -26,13 +26,14 @@ alist_token=""
 emby_host="http://localhost:8091"
 emby_api_key=""
 emby_ids=("3")
+tg_bot_token=""
+tg_chat_id=""
+
 if [ ! -d ${log_dir} ]
 then
 	mkdir -p ${log_dir}
 fi
-
 version=$(echo $qb_version | grep -P -o "([0-9]\.){2}[0-9]" | sed s/\\.//g)
-
 function qb_login(){
 	if [ "${version}" -gt 404 ]
 	then
@@ -41,7 +42,6 @@ function qb_login(){
 		if [ -n "${cookie}" ]
 		then
 			echo "[$(date '+%Y-%m-%d %H:%M:%S')] 登录成功！cookie:${cookie}" >> ${log_dir}/qb_login.log
-
 		else
 			echo "[$(date '+%Y-%m-%d %H:%M:%S')] 登录失败！" >> ${log_dir}/qb_login.log
 		fi
@@ -65,16 +65,23 @@ function qb_login(){
 		exit
 	fi
 }
+function tg_notice(){
+    curl -s -X POST "https://api.telegram.org/bot${tg_bot_token}/sendMessage" \
+    -d chat_id="${tg_chat_id}" \
+    -d text="Emby 媒体库已刷新" \
+    -d parse_mode="Markdown"
+}
 function emby_refresh(){
   local s="Recursive=true&ImageRefreshMode=Default&MetadataRefreshMode=Default&ReplaceAllImages=false&ReplaceAllMetadata=false"
   for id in "${emby_ids[@]}"; do
-	  local code=$(curl -s -o /dev/null -w "%{http_code}" \
-	  -X POST "${emby_host}/emby/Items/${id}/Refresh?${s}&api_key=${emby_api_key}")
-	  if [ "$code" -eq 200 ]; then
-		  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新成功！" >> ${log_dir}/ani.log
-	  else
-		  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新失败！" >> ${log_dir}/ani.log
-	  fi
+	 local code=$(curl -s -o /dev/null -w "%{http_code}" \
+	 -X POST "${emby_host}/emby/Items/${id}/Refresh?${s}&api_key=${emby_api_key}")
+	 if [ "$code" -eq 204 ]; then
+		 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新成功！" >> ${log_dir}/ani.log
+		 tg_notice
+	 else
+		 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Emby: ID ${id} 刷新失败！" >> ${log_dir}/ani.log
+	 fi
   done
 }
 function alist_refresh(){
@@ -82,11 +89,11 @@ function alist_refresh(){
   local url="${alist_host}/api/fs/list"
   local json
   json=$(jq -n --argjson refresh true --arg path "$path" '{refresh: $refresh, path: $path}')
-
   local res
   res=$(curl -s -X POST "$url" \
     -H "Authorization: ${alist_token}" \
-    -d "$json")
+    -H "Content-Type: application/json" \
+	-d "$json")
   local code
   code=$(echo "$res" | jq -r '.code')
   if [ "$code" -eq 200 ]
@@ -96,8 +103,6 @@ function alist_refresh(){
 	echo "[$(date '+%Y-%m-%d %H:%M:%S')] Alist: $path 刷新失败！" >> ${log_dir}/ani.log
   fi
 }
-
-
 function rclone_copy(){
 	local_dir="${content_dir}"
 	if [ "${type}" == "file" ]
@@ -120,10 +125,10 @@ function rclone_copy(){
 	then
 		alist_refresh "/Media/Bangumi"
 		alist_refresh "${target_dir}"
+		sleep 150
 		emby_refresh
 	fi
 }
-
 function qb_uploaded(){
 	if [ ${qb_v} == "1" ]
 	then
@@ -135,7 +140,6 @@ function qb_uploaded(){
 		echo "qb_v=${qb_v}" >> ${log_dir}/qb.log
 	fi
 }
-
 if [ -f "${content_dir}" ]
 then
    type="file"
@@ -145,12 +149,10 @@ then
 else
    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 未知类型，取消上传" >> ${log_dir}/qb.log
 fi
-
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 类型：${type}" >> ${log_dir}/qb.log
 rclone_copy
 qb_login
 qb_uploaded
-
 echo "种子名称：${torrent_name}" >> ${log_dir}/qb.log
 echo "内容路径：${content_dir}" >> ${log_dir}/qb.log
 echo "根目录：${root_dir}" >> ${log_dir}/qb.log
